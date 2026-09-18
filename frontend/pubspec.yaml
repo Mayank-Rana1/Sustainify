@@ -1,0 +1,24 @@
+name: sustainify_frontend
+description: Sustainify AI Frontend (Flutter)
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  camera: ^0.10.5+9
+  video_player: ^2.8.2
+  http: ^1.2.0
+  http_parser: ^4.0.2
+  mime: ^1.0.4
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
