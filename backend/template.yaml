@@ -1,0 +1,61 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Sustainify AI serverless backend
+Resources:
+  ImagesBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteUploads
+            Status: Enabled
+            ExpirationInDays: 30
+  AnalysesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: python3.12
+      Handler: app.handler
+      CodeUri: src/
+      Timeout: 30
+      MemorySize: 512
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref AnalysesTable
+          BUCKET_NAME: !Ref ImagesBucket
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AnalysesTable
+        - S3CrudPolicy:
+            BucketName: !Ref ImagesBucket
+        - Statement:
+            Effect: Allow
+            Action: bedrock:InvokeModel
+            Resource: '*'
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            Path: /{proxy+}
+            Method: ANY
+Outputs:
+  ApiUrl:
+    Value: !Sub https://${ServerlessHttpApi}.execute-api.${AWS::Region}.amazonaws.com
