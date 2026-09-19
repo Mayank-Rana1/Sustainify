@@ -49,12 +49,14 @@ class _ScanningPageState extends State<ScanningPage> {
   }
 
   Future<void> _takePicture() async {
-    if (!_controller.value.isInitialized) return;
+    if (!_controller.value.isInitialized || _isProcessing) return;
     try {
+      setState(() => _isProcessing = true);
       final image = await _controller.takePicture();
       await _processImage(File(image.path));
     } catch (e) {
       print('Error taking picture: $e');
+      setState(() => _isProcessing = false);
     }
   }
 

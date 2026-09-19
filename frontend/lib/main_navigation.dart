@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'main.dart';
 import 'profile_page.dart';
+import 'api_service.dart';
 
 class MainNavigation extends StatefulWidget {
   final CameraDescription camera;
@@ -84,31 +85,84 @@ class _MainNavigationState extends State<MainNavigation> {
               ),
             ),
             Expanded(
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Container(
-                      padding: EdgeInsets.all(24),
-                      decoration: BoxDecoration(
-                        color: Color(0xFFE8F5E9),
-                        shape: BoxShape.circle,
+              child: FutureBuilder<List<dynamic>>(
+                future: ApiService.getHistory(),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return Center(child: CircularProgressIndicator(color: Colors.green));
+                  }
+                  
+                  if (snapshot.hasError || !snapshot.hasData || snapshot.data!.isEmpty) {
+                    return Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Container(
+                            padding: EdgeInsets.all(24),
+                            decoration: BoxDecoration(color: Color(0xFFE8F5E9), shape: BoxShape.circle),
+                            child: Icon(Icons.qr_code_scanner, size: 48, color: Color(0xFF43A047)),
+                          ),
+                          SizedBox(height: 20),
+                          Text('No scans yet', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600, color: Color(0xFF2E7D32))),
+                          SizedBox(height: 8),
+                          Text(
+                            snapshot.hasError && snapshot.error.toString().contains('YOUR_API_URL') 
+                                ? 'Deploy the backend to view history'
+                                : 'Scan a product to see its\nsustainability analysis here',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 14, color: Colors.grey[500]),
+                          ),
+                        ],
                       ),
-                      child: Icon(Icons.qr_code_scanner, size: 48, color: Color(0xFF43A047)),
-                    ),
-                    SizedBox(height: 20),
-                    Text(
-                      'No scans yet',
-                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600, color: Color(0xFF2E7D32)),
-                    ),
-                    SizedBox(height: 8),
-                    Text(
-                      'Scan a product to see its\nsustainability analysis here',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 14, color: Colors.grey[500]),
-                    ),
-                  ],
-                ),
+                    );
+                  }
+
+                  final items = snapshot.data!;
+                  return ListView.builder(
+                    padding: EdgeInsets.symmetric(horizontal: 20),
+                    itemCount: items.length,
+                    itemBuilder: (context, index) {
+                      final item = items[index];
+                      final mode = item['mode'] ?? 'shop';
+                      final isShop = mode == 'shop';
+                      
+                      return Container(
+                        margin: EdgeInsets.only(bottom: 16),
+                        padding: EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: Offset(0, 4))],
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: isShop ? Colors.green[50] : Colors.blue[50],
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Icon(isShop ? Icons.shopping_cart : Icons.delete, color: isShop ? Colors.green[700] : Colors.blue[700]),
+                            ),
+                            SizedBox(width: 16),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(item['name'] ?? 'Unknown Item', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                                  SizedBox(height: 4),
+                                  Text(isShop ? 'Eco Score: ${item['result']['score'] ?? '-'}' : 'Action: ${item['result']['action'] ?? '-'}', 
+                                    style: TextStyle(color: Colors.grey[600], fontSize: 14)),
+                                ],
+                              ),
+                            ),
+                            Icon(Icons.chevron_right, color: Colors.grey[400]),
+                          ],
+                        ),
+                      );
+                    },
+                  );
+                },
               ),
             ),
           ],
