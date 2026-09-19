@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:video_player/video_player.dart';
 import 'widgets.dart';
 import 'scanning_page.dart';
+import 'login_page.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -29,7 +30,7 @@ class MyApp extends StatelessWidget {
         visualDensity: VisualDensity.adaptivePlatformDensity,
         fontFamily: 'Roboto',
       ),
-      home: MyHomePage(camera: camera),
+      home: LoginPage(camera: camera),
     );
   }
 }
