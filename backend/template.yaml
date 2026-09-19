@@ -1,6 +1,11 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: Sustainify AI serverless backend
+Parameters:
+  GeminiApiKey:
+    Type: String
+    Description: Google Gemini API Key
+
 Resources:
   ImagesBucket:
     Type: AWS::S3::Bucket
@@ -41,15 +46,12 @@ Resources:
         Variables:
           TABLE_NAME: !Ref AnalysesTable
           BUCKET_NAME: !Ref ImagesBucket
+          GEMINI_API_KEY: !Ref GeminiApiKey
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref AnalysesTable
         - S3CrudPolicy:
             BucketName: !Ref ImagesBucket
-        - Statement:
-            Effect: Allow
-            Action: bedrock:InvokeModel
-            Resource: '*'
       Events:
         Api:
           Type: HttpApi

@@ -4,7 +4,6 @@ from botocore.exceptions import ClientError
 
 s3 = boto3.client('s3')
 ddb = boto3.resource('dynamodb').Table(os.environ['TABLE_NAME'])
-bedrock = boto3.client('bedrock-runtime')
 BUCKET = os.environ['BUCKET_NAME']
 
 def response(code, body):
@@ -105,39 +104,36 @@ Return a strict JSON response containing:
 }}
 Do NOT wrap the JSON in markdown blocks (e.g., no ```json). Just return the raw JSON object."""
 
-        payload = {
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": 1000,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": media_type,
-                                "data": image_base64
-                            }
-                        },
-                        {
-                            "type": "text",
-                            "text": prompt
-                        }
-                    ]
-                }
-            ]
-        }
-
         try:
-            bedrock_resp = bedrock.invoke_model(
-                modelId='anthropic.claude-3-haiku-20240307-v1:0',
-                contentType='application/json',
-                accept='application/json',
-                body=json.dumps(payload)
+            gemini_key = os.environ.get('GEMINI_API_KEY')
+            if not gemini_key:
+                return response(500, {'error': 'GEMINI_API_KEY environment variable is not set'})
+                
+            import urllib.request
+            
+            payload = {
+                "contents": [{
+                    "parts": [
+                        {"text": prompt},
+                        {"inline_data": {"mime_type": media_type, "data": image_base64}}
+                    ]
+                }],
+                "generationConfig": {
+                    "responseMimeType": "application/json"
+                }
+            }
+            
+            req = urllib.request.Request(
+                f'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}',
+                data=json.dumps(payload).encode('utf-8'),
+                headers={'Content-Type': 'application/json'},
+                method='POST'
             )
-            response_body = json.loads(bedrock_resp['body'].read())
-            result_text = response_body['content'][0]['text'].strip()
+            
+            with urllib.request.urlopen(req) as resp:
+                response_body = json.loads(resp.read().decode('utf-8'))
+                
+            result_text = response_body['candidates'][0]['content']['parts'][0]['text'].strip()
             
             # Clean potential markdown formatting
             if result_text.startswith("```json"): result_text = result_text[7:]
