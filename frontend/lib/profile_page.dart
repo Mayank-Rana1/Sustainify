@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
-import 'login_page.dart';
 import 'api_service.dart';
 
 class ProfilePage extends StatelessWidget {
@@ -10,102 +9,150 @@ class ProfilePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      height: double.infinity,
-      decoration: BoxDecoration(
-        image: DecorationImage(
-          image: AssetImage('assets/images/profile.png'),
-          fit: BoxFit.cover,
-        ),
-      ),
-      child: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(30.0),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Profile',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontStyle: FontStyle.italic,
-                          color: Color(0xFF67B55D),
-                        ),
-                      ),
-                      Text(
-                        AuthService.username ?? 'User',
-                        style: TextStyle(
-                          fontSize: 36,
-                          fontWeight: FontWeight.bold,
-                          fontStyle: FontStyle.italic,
-                          color: Color(0xFF3B8132),
-                        ),
-                      ),
-                    ],
+    return Scaffold(
+      backgroundColor: Color(0xFFF5FFF5),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          child: Column(
+            children: [
+              SizedBox(height: 30),
+              // Profile avatar
+              Container(
+                width: 100,
+                height: 100,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: LinearGradient(
+                    colors: [Color(0xFF66BB6A), Color(0xFF43A047)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
                   ),
-                ],
+                  boxShadow: [
+                    BoxShadow(color: Color(0xFF66BB6A).withOpacity(0.4), blurRadius: 16, offset: Offset(0, 6)),
+                  ],
+                ),
+                child: Icon(Icons.person, size: 50, color: Colors.white),
               ),
-            ),
-            SizedBox(height: 100),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 40.0),
-                child: ListView(
+              SizedBox(height: 16),
+              Text(
+                'Sustainify User',
+                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFF2E7D32)),
+              ),
+              SizedBox(height: 4),
+              Text(
+                'Making the planet greener 🌱',
+                style: TextStyle(fontSize: 14, color: Color(0xFF66BB6A)),
+              ),
+              SizedBox(height: 30),
+
+              // Stats row
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: 24),
+                child: Row(
                   children: [
-                    _buildMenuButton(Icons.card_giftcard, 'Rewards'),
-                    _buildMenuButton(Icons.vpn_key_outlined, 'Change Password'),
-                    _buildMenuButton(Icons.badge_outlined, 'Details'),
-                    _buildMenuButton(Icons.settings_outlined, 'Settings'),
-                    _buildMenuButton(Icons.notes, 'Terms and Conditions', isLogout: true, context: context),
+                    _buildStatCard('Scans', '12', Icons.qr_code_scanner),
+                    SizedBox(width: 12),
+                    _buildStatCard('Eco Score', '78', Icons.eco),
+                    SizedBox(width: 12),
+                    _buildStatCard('Items Saved', '5', Icons.recycling),
                   ],
                 ),
               ),
-            ),
+              SizedBox(height: 30),
+
+              // Menu items
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: 24),
+                child: Column(
+                  children: [
+                    _buildMenuItem(Icons.history, 'Scan History', 'View your past scans', () {}),
+                    _buildMenuItem(Icons.settings_outlined, 'Settings', 'App preferences', () {}),
+                    _buildMenuItem(Icons.info_outline, 'About Sustainify', 'Learn about our mission', () {}),
+                    _buildMenuItem(Icons.privacy_tip_outlined, 'Privacy Policy', 'How we handle your data', () {}),
+                  ],
+                ),
+              ),
+              SizedBox(height: 20),
+
+              // Version
+              Text(
+                'Sustainify AI v1.0.0',
+                style: TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+              SizedBox(height: 8),
+              Text(
+                'Powered by AWS ☁️',
+                style: TextStyle(fontSize: 12, color: Color(0xFF66BB6A), fontWeight: FontWeight.w500),
+              ),
+              SizedBox(height: 30),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatCard(String label, String value, IconData icon) {
+    return Expanded(
+      child: Container(
+        padding: EdgeInsets.symmetric(vertical: 16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: Offset(0, 4)),
+          ],
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: Color(0xFF43A047), size: 24),
+            SizedBox(height: 8),
+            Text(value, style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF2E7D32))),
+            SizedBox(height: 4),
+            Text(label, style: TextStyle(fontSize: 11, color: Colors.grey[600])),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildMenuButton(IconData icon, String text, {bool isLogout = false, BuildContext? context}) {
+  Widget _buildMenuItem(IconData icon, String title, String subtitle, VoidCallback onTap) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 16.0),
+      padding: EdgeInsets.only(bottom: 12),
       child: InkWell(
-        onTap: () {
-          if (isLogout && context != null) {
-            AuthService.signOut();
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => LoginPage(camera: camera)),
-            );
-          }
-        },
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
         child: Container(
+          padding: EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: Color(0xFF90C988).withOpacity(0.9),
-            borderRadius: BorderRadius.circular(12),
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: Offset(0, 2)),
+            ],
           ),
-          padding: EdgeInsets.symmetric(horizontal: 20, vertical: 16),
           child: Row(
             children: [
-              Icon(icon, color: Color(0xFF3B8132)),
-              SizedBox(width: 20),
-              Text(
-                text,
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w500,
-                  fontStyle: FontStyle.italic,
-                  color: Color(0xFF193B15),
+              Container(
+                padding: EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Color(0xFFE8F5E9),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(icon, color: Color(0xFF43A047), size: 22),
+              ),
+              SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Color(0xFF2E7D32))),
+                    SizedBox(height: 2),
+                    Text(subtitle, style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+                  ],
                 ),
               ),
+              Icon(Icons.chevron_right, color: Colors.grey[400]),
             ],
           ),
         ),
