@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'login_page.dart';
+import 'api_service.dart';
 
 class ProfilePage extends StatelessWidget {
   final CameraDescription camera;
@@ -39,7 +40,7 @@ class ProfilePage extends StatelessWidget {
                         ),
                       ),
                       Text(
-                        'Srikar',
+                        AuthService.username ?? 'User',
                         style: TextStyle(
                           fontSize: 36,
                           fontWeight: FontWeight.bold,
@@ -79,6 +80,7 @@ class ProfilePage extends StatelessWidget {
       child: InkWell(
         onTap: () {
           if (isLogout && context != null) {
+            AuthService.signOut();
             Navigator.pushReplacement(
               context,
               MaterialPageRoute(builder: (context) => LoginPage(camera: camera)),

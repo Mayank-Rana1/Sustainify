@@ -4,35 +4,236 @@ from botocore.exceptions import ClientError
 
 s3 = boto3.client('s3')
 ddb = boto3.resource('dynamodb').Table(os.environ['TABLE_NAME'])
+rekognition = boto3.client('rekognition')
 BUCKET = os.environ['BUCKET_NAME']
 
-def response(code, body):
+# ---------- Material sustainability knowledge base ----------
+MATERIAL_SCORES = {
+    'plastic': {'recyclability': 8, 'eco': 20, 'action': 'RECYCLE', 'hazard': False,
+                'category': 'Household material', 'material': 'Plastic'},
+    'bottle': {'recyclability': 14, 'eco': 40, 'action': 'RECYCLE', 'hazard': False,
+               'category': 'Household material', 'material': 'Plastic/Glass'},
+    'glass': {'recyclability': 18, 'eco': 60, 'action': 'RECYCLE', 'hazard': False,
+              'category': 'Household material', 'material': 'Glass'},
+    'metal': {'recyclability': 16, 'eco': 55, 'action': 'RECYCLE', 'hazard': False,
+              'category': 'Household material', 'material': 'Metal'},
+    'aluminum': {'recyclability': 18, 'eco': 65, 'action': 'RECYCLE', 'hazard': False,
+                 'category': 'Household material', 'material': 'Aluminum'},
+    'paper': {'recyclability': 16, 'eco': 70, 'action': 'RECYCLE', 'hazard': False,
+              'category': 'Household material', 'material': 'Paper'},
+    'cardboard': {'recyclability': 18, 'eco': 75, 'action': 'RECYCLE', 'hazard': False,
+                  'category': 'Household material', 'material': 'Cardboard'},
+    'wood': {'recyclability': 12, 'eco': 70, 'action': 'REUSE', 'hazard': False,
+             'category': 'Household material', 'material': 'Wood'},
+    'textile': {'recyclability': 8, 'eco': 45, 'action': 'DONATE', 'hazard': False,
+                'category': 'Household material', 'material': 'Textile/Fabric'},
+    'clothing': {'recyclability': 8, 'eco': 45, 'action': 'DONATE', 'hazard': False,
+                 'category': 'Household material', 'material': 'Textile/Fabric'},
+    'electronics': {'recyclability': 6, 'eco': 20, 'action': 'SAFE DISPOSAL', 'hazard': True,
+                    'category': 'E-waste', 'material': 'Mixed electronics'},
+    'battery': {'recyclability': 4, 'eco': 10, 'action': 'SAFE DISPOSAL', 'hazard': True,
+                'category': 'Hazardous household waste', 'material': 'Lithium/Alkaline'},
+    'food': {'recyclability': 0, 'eco': 60, 'action': 'COMPOST', 'hazard': False,
+             'category': 'Organic waste', 'material': 'Organic matter'},
+    'fruit': {'recyclability': 0, 'eco': 80, 'action': 'COMPOST', 'hazard': False,
+              'category': 'Organic waste', 'material': 'Organic matter'},
+    'vegetable': {'recyclability': 0, 'eco': 80, 'action': 'COMPOST', 'hazard': False,
+                  'category': 'Organic waste', 'material': 'Organic matter'},
+    'ceramic': {'recyclability': 4, 'eco': 40, 'action': 'REUSE', 'hazard': False,
+                'category': 'Household material', 'material': 'Ceramic'},
+    'rubber': {'recyclability': 6, 'eco': 30, 'action': 'SAFE DISPOSAL', 'hazard': False,
+               'category': 'Household material', 'material': 'Rubber'},
+    'furniture': {'recyclability': 10, 'eco': 50, 'action': 'DONATE', 'hazard': False,
+                  'category': 'Household material', 'material': 'Mixed (Wood/Metal/Fabric)'},
+    'toy': {'recyclability': 8, 'eco': 40, 'action': 'DONATE', 'hazard': False,
+            'category': 'Household material', 'material': 'Plastic/Mixed'},
+    'container': {'recyclability': 14, 'eco': 50, 'action': 'REUSE', 'hazard': False,
+                  'category': 'Household material', 'material': 'Plastic/Glass'},
+    'bag': {'recyclability': 6, 'eco': 25, 'action': 'REUSE', 'hazard': False,
+            'category': 'Household material', 'material': 'Plastic/Fabric'},
+    'can': {'recyclability': 18, 'eco': 65, 'action': 'RECYCLE', 'hazard': False,
+            'category': 'Household material', 'material': 'Aluminum/Steel'},
+}
+
+PACKAGING_KEYWORDS = {'plastic', 'wrapper', 'packaging', 'box', 'cardboard', 'bag', 'container', 'bottle', 'can', 'jar'}
+ECO_POSITIVE_KEYWORDS = {'paper', 'cardboard', 'glass', 'wood', 'bamboo', 'cotton', 'natural', 'organic', 'plant', 'leaf'}
+ECO_NEGATIVE_KEYWORDS = {'plastic', 'styrofoam', 'polystyrene', 'synthetic', 'chemical'}
+
+def resp(code, body):
     return {
-        'statusCode': code, 
-        'headers': {'content-type':'application/json','access-control-allow-origin':'*'}, 
-        'body': json.dumps(body)
+        'statusCode': code,
+        'headers': {'content-type': 'application/json', 'access-control-allow-origin': '*',
+                    'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
+                    'access-control-allow-headers': 'Content-Type,Authorization'},
+        'body': json.dumps(body, default=str)
     }
 
-def handler(event, context):
-    method = event.get('requestContext',{}).get('http',{}).get('method','GET')
-    path = event.get('rawPath','/')
-    user = event.get('requestContext',{}).get('authorizer',{}).get('jwt',{}).get('claims',{}).get('sub','guest')
+def _match_labels(labels):
+    """Match Rekognition labels against our material knowledge base."""
+    matched = []
+    label_names = [l['Name'].lower() for l in labels]
+    for name in label_names:
+        for keyword, data in MATERIAL_SCORES.items():
+            if keyword in name:
+                matched.append({'label': name, 'confidence': next(
+                    l['Confidence'] for l in labels if l['Name'].lower() == name
+                ), **data})
+                break
+    return matched, label_names
+
+def _analyze_shop(labels, name, details):
+    """Build Shop Smart analysis from Rekognition labels."""
+    matched, label_names = _match_labels(labels)
     
-    # 1. Generate Presigned URL for Image Upload
+    # Packaging analysis
+    packaging_labels = [l for l in label_names if l in PACKAGING_KEYWORDS]
+    packaging_desc = f"Detected packaging: {', '.join(packaging_labels)}" if packaging_labels else "No specific packaging detected in image"
+    
+    # Eco scoring
+    positives = [l for l in label_names if l in ECO_POSITIVE_KEYWORDS]
+    concerns = [l for l in label_names if l in ECO_NEGATIVE_KEYWORDS]
+    
+    # Calculate scores
+    base_score = 50
+    base_score += len(positives) * 8
+    base_score -= len(concerns) * 10
+    if matched:
+        avg_recyclability = sum(m['recyclability'] for m in matched) / len(matched)
+        base_score = int(base_score * 0.6 + avg_recyclability / 20 * 100 * 0.4)
+    score = max(5, min(95, base_score))
+    
+    if score >= 80: rating = "Excellent"
+    elif score >= 60: rating = "Good"
+    elif score >= 40: rating = "Average"
+    elif score >= 20: rating = "Poor"
+    else: rating = "Very Poor"
+    
+    # Breakdown
+    pkg_score = min(25, 15 + len(positives) * 3 - len(concerns) * 4)
+    mat_score = min(25, int(score * 0.25))
+    rec_score = min(20, int(sum(m.get('recyclability', 10) for m in matched) / max(1, len(matched))))
+    reu_score = min(15, 8 + len([m for m in matched if m.get('action') == 'REUSE']) * 4)
+    sig_score = min(15, score // 7)
+    
+    return {
+        "type": "shop",
+        "name": name or "Product",
+        "score": score,
+        "rating": rating,
+        "confidence": round(sum(l['Confidence'] for l in labels[:5]) / max(1, min(5, len(labels))) / 100, 2),
+        "packaging": packaging_desc,
+        "recyclability": f"Recyclability score: {rec_score}/20. " + (
+            f"Materials detected: {', '.join(m['material'] for m in matched[:3])}" if matched else "Unable to determine specific materials"
+        ),
+        "positives": [f"Contains {p} (eco-friendly material)" for p in positives] or ["Product detected successfully"],
+        "concerns": [f"Contains {c} (environmental concern)" for c in concerns] or ["No major concerns detected"],
+        "breakdown": {
+            "Packaging": max(0, pkg_score),
+            "Material": max(0, mat_score),
+            "Recyclability": max(0, rec_score),
+            "Reusability": max(0, reu_score),
+            "Product signals": max(0, sig_score)
+        },
+        "better": "Consider products with minimal packaging and recyclable materials.",
+        "detected_labels": [{"name": l['Name'], "confidence": round(l['Confidence'], 1)} for l in labels[:10]]
+    }
+
+def _analyze_dispose(labels, name, condition, details):
+    """Build Dispose Smart analysis from Rekognition labels."""
+    matched, label_names = _match_labels(labels)
+    
+    if matched:
+        best = max(matched, key=lambda m: m['confidence'])
+        action = best['action']
+        material = best['material']
+        category = best['category']
+        hazard = best['hazard']
+    else:
+        action = "SAFE DISPOSAL"
+        material = "Unknown material"
+        category = "General waste"
+        hazard = False
+    
+    # Adjust based on condition
+    if condition and 'broken' in condition.lower():
+        if action == 'DONATE': action = 'REPAIR'
+    if condition and 'good' in condition.lower():
+        if action in ('SAFE DISPOSAL', 'RECYCLE'): action = 'DONATE'
+    
+    steps_map = {
+        'RECYCLE': [f"Clean the {name or 'item'} thoroughly", "Check local recycling guidelines for accepted materials",
+                    "Place in the appropriate recycling bin", "Remove any non-recyclable components first"],
+        'DONATE': [f"Clean and prepare the {name or 'item'}", "Check if local charities accept this type of item",
+                   "Package securely for transport", "Drop off at donation center or schedule pickup"],
+        'COMPOST': [f"Break down the {name or 'item'} into smaller pieces", "Add to your compost bin or garden",
+                    "Mix with brown materials (leaves, cardboard)", "Keep compost moist and aerated"],
+        'SAFE DISPOSAL': [f"Check local hazardous waste guidelines", "Do NOT place in regular trash or recycling",
+                          "Find nearest designated drop-off facility", "Transport safely in sealed container"],
+        'REPAIR': [f"Assess the damage to the {name or 'item'}", "Search for local repair shops or online guides",
+                   "Gather necessary repair materials", "Consider professional repair if complex"],
+        'REUSE': [f"Clean the {name or 'item'} thoroughly", "Consider creative repurposing ideas",
+                  "Use as storage, planter, organizer, or craft material", "Share reuse ideas on community forums"],
+    }
+    
+    diy_map = {
+        'plastic': f"Cut and reshape into a small planter or organizer",
+        'bottle': f"Transform into a self-watering planter or bird feeder",
+        'glass': f"Use as a decorative vase, candle holder, or storage jar",
+        'cardboard': f"Create storage boxes, drawer dividers, or kids' craft projects",
+        'textile': f"Make cleaning rags, tote bags, or patchwork quilts",
+        'wood': f"Build a small shelf, picture frame, or garden marker",
+        'can': f"Create a pencil holder, herb planter, or lantern",
+        'container': f"Reuse as lunch box, craft supply organizer, or seed starter",
+    }
+    
+    diy = None
+    for key in diy_map:
+        if any(key in ln for ln in label_names):
+            diy = diy_map[key]
+            break
+    
+    return {
+        "type": "dispose",
+        "name": name or "Item",
+        "action": action,
+        "confidence": round(sum(l['Confidence'] for l in labels[:5]) / max(1, min(5, len(labels))) / 100, 2),
+        "material": material,
+        "category": category,
+        "hazard": hazard,
+        "steps": steps_map.get(action, ["Consult local waste management guidelines"]),
+        "diy": diy,
+        "detected_labels": [{"name": l['Name'], "confidence": round(l['Confidence'], 1)} for l in labels[:10]]
+    }
+
+
+def handler(event, context):
+    method = event.get('requestContext', {}).get('http', {}).get('method', 'GET')
+    path = event.get('rawPath', '/')
+    user = event.get('requestContext', {}).get('authorizer', {}).get('jwt', {}).get('claims', {}).get('sub', 'guest')
+
+    # Handle CORS preflight
+    if method == 'OPTIONS':
+        return resp(200, {})
+
+    # ---- 1. Health check ----
+    if method == 'GET' and path == '/health':
+        return resp(200, {'status': 'ok', 'services': ['S3', 'DynamoDB', 'Rekognition', 'Lambda', 'API Gateway']})
+
+    # ---- 2. Generate Presigned URL for S3 Upload ----
     if method == 'POST' and path == '/upload-url':
         body = json.loads(event.get('body') or '{}')
-        ext = body.get('extension','jpg').lower()
-        if ext not in ('jpg','jpeg','png','webp'): 
-            return response(400, {'error':'Unsupported image type'})
+        ext = body.get('extension', 'jpg').lower()
+        if ext not in ('jpg', 'jpeg', 'png', 'webp'):
+            return resp(400, {'error': 'Unsupported image type. Use jpg, jpeg, png, or webp'})
         key = f"uploads/{user}/{uuid.uuid4()}.{ext}"
         url = s3.generate_presigned_url(
             'put_object',
             Params={'Bucket': BUCKET, 'Key': key, 'ContentType': f'image/{ext}'},
             ExpiresIn=300
         )
-        return response(200, {'uploadUrl': url, 'imageKey': key})
-        
-    # 2. Analyze the uploaded image using Amazon Bedrock
+        return resp(200, {'uploadUrl': url, 'imageKey': key})
+
+    # ---- 3. Analyze image using Amazon Rekognition ----
     if method == 'POST' and path.startswith('/analyses'):
         body = json.loads(event.get('body') or '{}')
         mode = body.get('mode', 'shop')
@@ -40,111 +241,28 @@ def handler(event, context):
         name = body.get('name', '')
         details = body.get('details', '')
         condition = body.get('condition', '')
-        
+
         if not image_key:
-            return response(400, {'error': 'imageKey is required'})
-            
+            return resp(400, {'error': 'imageKey is required'})
+
+        # Call Amazon Rekognition to detect labels in the image
         try:
-            s3_obj = s3.get_object(Bucket=BUCKET, Key=image_key)
-            image_bytes = s3_obj['Body'].read()
-            image_base64 = base64.b64encode(image_bytes).decode('utf-8')
-            
-            ext = image_key.split('.')[-1].lower()
-            media_type = f"image/{ext}" if ext in ['png', 'jpeg', 'webp'] else "image/jpeg"
-            if ext == 'jpg': media_type = 'image/jpeg'
-        except ClientError as e:
-            return response(500, {'error': f"Failed to retrieve image from S3: {str(e)}"})
-
-        if mode == "shop":
-            prompt = f"""You are Sustainify AI, an expert environmental sustainability assistant.
-Analyze the following product or packaging before purchase.
-Product Name: {name}
-Details: {details}
-
-Based on the image and details, return a strict JSON response containing:
-{{
-    "type": "shop",
-    "name": "{name or 'Product'}",
-    "score": <integer from 0 to 100 representing Eco Score>,
-    "rating": "<Excellent|Good|Average|Poor|Very Poor>",
-    "confidence": <float from 0.0 to 1.0>,
-    "packaging": "<analysis of visible packaging>",
-    "recyclability": "<details on recyclability>",
-    "positives": ["<list of positive environmental signals>"],
-    "concerns": ["<list of environmental concerns>"],
-    "breakdown": {{
-        "Packaging": <score out of 25>,
-        "Material": <score out of 25>,
-        "Recyclability": <score out of 20>,
-        "Reusability": <score out of 15>,
-        "Product signals": <score out of 15>
-    }},
-    "better": "<suggestion for a better alternative>"
-}}
-Do NOT wrap the JSON in markdown blocks (e.g., no ```json). Just return the raw JSON object."""
-        else:
-            prompt = f"""You are Sustainify AI, an expert environmental sustainability assistant.
-Analyze the following item after use to provide disposal or reuse guidance.
-Item Name: {name}
-Condition: {condition}
-Details: {details}
-
-Determine the best action from: RECYCLE, DONATE, COMPOST, SAFE DISPOSAL, REPAIR, REUSE.
-Return a strict JSON response containing:
-{{
-    "type": "dispose",
-    "name": "{name or 'Item'}",
-    "action": "<The best action>",
-    "confidence": <float from 0.0 to 1.0>,
-    "material": "<estimated materials>",
-    "category": "<Household material | Potentially hazardous household waste | etc>",
-    "hazard": <true/false if it is hazardous or e-waste>,
-    "steps": ["<step 1>", "<step 2>", "<step 3>"],
-    "diy": "<a brief idea to repurpose or upcycle this item if safe, otherwise null>"
-}}
-Do NOT wrap the JSON in markdown blocks (e.g., no ```json). Just return the raw JSON object."""
-
-        try:
-            gemini_key = os.environ.get('GEMINI_API_KEY')
-            if not gemini_key:
-                return response(500, {'error': 'GEMINI_API_KEY environment variable is not set'})
-                
-            import urllib.request
-            
-            payload = {
-                "contents": [{
-                    "parts": [
-                        {"text": prompt},
-                        {"inline_data": {"mime_type": media_type, "data": image_base64}}
-                    ]
-                }],
-                "generationConfig": {
-                    "responseMimeType": "application/json"
-                }
-            }
-            
-            req = urllib.request.Request(
-                f'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}',
-                data=json.dumps(payload).encode('utf-8'),
-                headers={'Content-Type': 'application/json'},
-                method='POST'
+            rek_response = rekognition.detect_labels(
+                Image={'S3Object': {'Bucket': BUCKET, 'Name': image_key}},
+                MaxLabels=20,
+                MinConfidence=60
             )
-            
-            with urllib.request.urlopen(req) as resp:
-                response_body = json.loads(resp.read().decode('utf-8'))
-                
-            result_text = response_body['candidates'][0]['content']['parts'][0]['text'].strip()
-            
-            # Clean potential markdown formatting
-            if result_text.startswith("```json"): result_text = result_text[7:]
-            if result_text.startswith("```"): result_text = result_text[3:]
-            if result_text.endswith("```"): result_text = result_text[:-3]
-            
-            ai_result = json.loads(result_text)
-        except Exception as e:
-            return response(500, {'error': f'Failed to generate AI response: {str(e)}'})
+            labels = rek_response.get('Labels', [])
+        except ClientError as e:
+            return resp(500, {'error': f'Amazon Rekognition failed: {str(e)}'})
 
-        # Save to DynamoDB
+        # Build sustainability analysis from Rekognition labels
+        if mode == 'shop':
+            ai_result = _analyze_shop(labels, name, details)
+        else:
+            ai_result = _analyze_dispose(labels, name, condition, details)
+
+        # Save analysis to DynamoDB
         aid = str(uuid.uuid4())
         now = int(time.time())
         item = {
@@ -160,12 +278,15 @@ Do NOT wrap the JSON in markdown blocks (e.g., no ```json). Just return the raw 
             'result': ai_result
         }
         ddb.put_item(Item=item)
-        return response(201, item)
-        
-    # 3. Retrieve Analysis History
+        return resp(201, item)
+
+    # ---- 4. Retrieve Analysis History from DynamoDB ----
     if method == 'GET' and path == '/analyses':
         from boto3.dynamodb.conditions import Key
-        data = ddb.query(KeyConditionExpression=Key('PK').eq(f'USER#{user}'), ScanIndexForward=False)
-        return response(200, {'items': data.get('Items',[])})
-        
-    return response(404, {'error':'Not found'})
+        data = ddb.query(
+            KeyConditionExpression=Key('PK').eq(f'USER#{user}'),
+            ScanIndexForward=False
+        )
+        return resp(200, {'items': data.get('Items', [])})
+
+    return resp(404, {'error': 'Not found'})
