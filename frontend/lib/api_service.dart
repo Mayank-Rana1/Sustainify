@@ -6,12 +6,12 @@ import 'package:mime/mime.dart';
 /// AWS Configuration — Fill these after running `sam deploy`
 class AwsConfig {
   // API Gateway endpoint (from SAM output "ApiUrl")
-  static const String apiUrl = 'YOUR_API_URL_HERE';
+  static const String apiUrl = 'https://xfjarf8p7b.execute-api.ap-south-1.amazonaws.com';
 
   // Cognito (from SAM outputs "UserPoolId" and "UserPoolClientId")
   static const String userPoolId = 'YOUR_USER_POOL_ID';
   static const String clientId = 'YOUR_CLIENT_ID';
-  static const String region = 'ap-south-1'; // Change to your AWS region
+  static const String region = 'ap-south-1'; // AWS region
 }
 
 /// ---------- Cognito Auth Service (AWS Cognito) ----------

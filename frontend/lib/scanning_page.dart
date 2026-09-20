@@ -119,9 +119,20 @@ class _ScanningPageState extends State<ScanningPage>
   }
 
   Future<void> _pickGallery() async {
-    FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.image);
-    if (result != null) {
-      await _processImage(File(result.files.single.path!));
+    if (_isProcessing) return;
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        allowMultiple: false,
+      );
+      if (result != null && result.files.single.path != null) {
+        await _processImage(File(result.files.single.path!));
+      }
+    } catch (e) {
+      print('Gallery picker error: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not pick image from gallery: $e')),
+      );
     }
   }
 
@@ -213,6 +224,7 @@ class _ScanningPageState extends State<ScanningPage>
                         onPressed: _pickGallery,
                       ),
                       GestureDetector(
+                        onTap: _takePicture,
                         onLongPressStart: (details) => _startVideoRecording(),
                         onLongPressEnd: (details) => _stopVideoRecording(),
                         child: Stack(
@@ -233,9 +245,9 @@ class _ScanningPageState extends State<ScanningPage>
                               radius: 35.0,
                               backgroundColor: Colors.greenAccent[700],
                               child: Icon(
-                                _isRecording ? Icons.stop : Icons.videocam,
+                                _isRecording ? Icons.stop : Icons.camera_alt,
                                 color: Colors.white,
-                                size: 35.0,
+                                size: 32.0,
                               ),
                             ),
                           ],
