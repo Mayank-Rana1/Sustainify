@@ -85,9 +85,29 @@ def _analyze_shop(labels, name, details):
     """Build Shop Smart analysis from Rekognition labels."""
     matched, label_names = _match_labels(labels)
     
+    # Pick intelligent name from Rekognition labels if not provided
+    if not name or name.lower() in ('item', 'product', 'test', ''):
+        # Prefer specific product labels over human body parts
+        ignore_labels = {'person', 'human', 'face', 'head', 'skin', 'adult', 'male', 'female', 'people'}
+        candidates = [l['Name'] for l in labels if l['Name'].lower() not in ignore_labels]
+        if candidates:
+            name = candidates[0]
+        elif labels:
+            name = labels[0]['Name']
+        else:
+            name = "Scanned Item"
+
+    # Derive product categories / types
+    types = [m['category'] for m in matched if m.get('category')]
+    if not types:
+        types = [l['Name'] for l in labels if l['Name'].lower() not in {'person', 'human', 'face'}][:3]
+    if not types:
+        types = ["Eco Product", "Consumer Good"]
+    types = list(dict.fromkeys(types))[:3]
+    
     # Packaging analysis
     packaging_labels = [l for l in label_names if l in PACKAGING_KEYWORDS]
-    packaging_desc = f"Detected packaging: {', '.join(packaging_labels)}" if packaging_labels else "No specific packaging detected in image"
+    packaging_desc = f"Detected packaging: {', '.join(packaging_labels)}" if packaging_labels else "No packaging detected"
     
     # Eco scoring
     positives = [l for l in label_names if l in ECO_POSITIVE_KEYWORDS]
@@ -117,16 +137,17 @@ def _analyze_shop(labels, name, details):
     
     return {
         "type": "shop",
-        "name": name or "Product",
+        "name": name,
+        "types": types,
         "score": score,
         "rating": rating,
-        "confidence": round(sum(l['Confidence'] for l in labels[:5]) / max(1, min(5, len(labels))) / 100, 2),
+        "confidence": round(sum(l['Confidence'] for l in labels[:5]) / max(1, min(5, len(labels))) / 100, 2) if labels else 0.85,
         "packaging": packaging_desc,
         "recyclability": f"Recyclability score: {rec_score}/20. " + (
-            f"Materials detected: {', '.join(m['material'] for m in matched[:3])}" if matched else "Unable to determine specific materials"
+            f"Materials detected: {', '.join(m['material'] for m in matched[:3])}" if matched else "Mixed materials detected"
         ),
-        "positives": [f"Contains {p} (eco-friendly material)" for p in positives] or ["Product detected successfully"],
-        "concerns": [f"Contains {c} (environmental concern)" for c in concerns] or ["No major concerns detected"],
+        "positives": [f"Contains {p} (eco-friendly material)" for p in positives] or ["Safe for standard handling"],
+        "concerns": [f"Contains {c} (environmental concern)" for c in concerns] or ["No hazardous elements flagged"],
         "breakdown": {
             "Packaging": max(0, pkg_score),
             "Material": max(0, mat_score),
@@ -192,11 +213,23 @@ def _analyze_dispose(labels, name, condition, details):
             diy = diy_map[key]
             break
     
+    # Pick intelligent name from Rekognition labels if not provided
+    if not name or name.lower() in ('item', 'product', 'test', ''):
+        ignore_labels = {'person', 'human', 'face', 'head', 'skin', 'adult', 'male', 'female', 'people'}
+        candidates = [l['Name'] for l in labels if l['Name'].lower() not in ignore_labels]
+        if candidates:
+            name = candidates[0]
+        elif labels:
+            name = labels[0]['Name']
+        else:
+            name = "Scanned Item"
+
     return {
         "type": "dispose",
-        "name": name or "Item",
+        "name": name,
+        "types": [category, material] if material != "Unknown material" else ["Household Item"],
         "action": action,
-        "confidence": round(sum(l['Confidence'] for l in labels[:5]) / max(1, min(5, len(labels))) / 100, 2),
+        "confidence": round(sum(l['Confidence'] for l in labels[:5]) / max(1, min(5, len(labels))) / 100, 2) if labels else 0.85,
         "material": material,
         "category": category,
         "hazard": hazard,

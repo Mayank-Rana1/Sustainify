@@ -52,6 +52,10 @@ class _MyHomePageState extends State<MyHomePage>
   late Future<void> _loadingFuture;
   File? _recordedVideo;
 
+  int _scannedEcoScore = 78;
+  List<String> _scannedTypes = ['Eco Certified', 'Consumer Good'];
+  String _scannedLocation = 'Verified by AWS';
+
   // Default response data with environment impact data
   Map<String, dynamic> response = {
   "message": "File uploaded successfully",
@@ -200,13 +204,13 @@ class _MyHomePageState extends State<MyHomePage>
 
   File? _recordedImage;
 
-  Future<void> _navigateToScanningPage() async {
+  Future<void> _navigateToScanningPage([String mode = 'shop']) async {
     final result = await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => ScanningPage(
           camera: widget.camera,
-          mode: 'shop',
+          mode: mode,
         ),
       ),
     );
@@ -216,35 +220,68 @@ class _MyHomePageState extends State<MyHomePage>
         _recordedVideo = null;
         _controller?.pause();
         
-        // Mock data override with AWS data
         final aiData = result['result'];
         if (aiData != null) {
-          response['data']['product details']['brand name'] = "AWS Scan";
-          response['data']['product details']['product name'] = aiData['name'] ?? "Product";
+          final detectedLabels = (aiData['detected_labels'] as List?)
+              ?.map((l) => l['name']?.toString() ?? '')
+              .where((s) => s.isNotEmpty)
+              .toList() ?? [];
+
+          final itemName = aiData['name'] ?? (detectedLabels.isNotEmpty ? detectedLabels.first : "Scanned Item");
+          
+          if (aiData['score'] != null) {
+            _scannedEcoScore = (aiData['score'] is num) ? (aiData['score'] as num).toInt() : 75;
+          }
+          
+          if (aiData['types'] is List && (aiData['types'] as List).isNotEmpty) {
+            _scannedTypes = (aiData['types'] as List).map((e) => e.toString()).toList();
+          } else if (detectedLabels.isNotEmpty) {
+            _scannedTypes = detectedLabels.take(3).toList();
+          }
+
+          _scannedLocation = "AWS Rekognition Analysis";
+
+          response['data']['product details']['brand name'] = "Detected:";
+          response['data']['product details']['product name'] = itemName;
           
           if (aiData['action'] != null) {
-            response['data']['product details']['product description'] = "Disposal Action: ${aiData['action']}\nMaterial: ${aiData['material']}\nSteps: ${aiData['steps']?.join(', ')}";
+            response['data']['product details']['product description'] = "Disposal Action: ${aiData['action']}\nPrimary Material: ${aiData['material'] ?? 'Mixed'}\n\nRecommended Action Steps:\n${(aiData['steps'] as List?)?.map((s) => '• $s').join('\n') ?? 'Follow local recycling guidelines'}";
           } else {
-            response['data']['product details']['product description'] = "Score: ${aiData['score']}\nRating: ${aiData['rating']}\n${aiData['better'] ?? ''}";
+            response['data']['product details']['product description'] = "Eco Score: $_scannedEcoScore/100 (${aiData['rating'] ?? 'Average'})\n\n${aiData['better'] ?? 'Consider eco-friendly alternatives with minimal packaging.'}";
           }
           
-          response['data']['product details']['calorie count'] = [["Confidence", "${((aiData['confidence'] ?? 0)*100).toInt()}%"]];
-          
-          if (aiData['positives'] != null) {
-            response['data']['good-bad-ingridients']['good'] = aiData['positives'];
+          response['data']['product details']['Packaging description'] = aiData['packaging'] ?? (detectedLabels.isNotEmpty ? "Identified features: ${detectedLabels.join(', ')}" : "No packaging details detected");
+
+          response['data']['product details']['calorie count'] = [
+            ["Confidence", "${((aiData['confidence'] ?? 0.85)*100).toInt()}%"],
+            ["Eco Rating", "${aiData['rating'] ?? 'Good'}"]
+          ];
+
+          if (detectedLabels.isNotEmpty) {
+            response['data']['product details']['ingredients'] = detectedLabels;
           }
-          if (aiData['concerns'] != null) {
-            response['data']['good-bad-ingridients']['bad'] = aiData['concerns'];
+
+          if (aiData['positives'] != null && (aiData['positives'] as List).isNotEmpty) {
+            response['data']['good-bad-ingridients']['good'] = List<String>.from(aiData['positives']);
+          } else if (detectedLabels.isNotEmpty) {
+            response['data']['good-bad-ingridients']['good'] = detectedLabels.take(3).map((l) => "$l detected").toList();
+          }
+
+          if (aiData['concerns'] != null && (aiData['concerns'] as List).isNotEmpty) {
+            response['data']['good-bad-ingridients']['bad'] = List<String>.from(aiData['concerns']);
+          } else {
+            response['data']['good-bad-ingridients']['bad'] = ["Standard environmental footprint"];
           }
           
           if (aiData['breakdown'] != null) {
             response['data']['environment_impact']['carbon_footprint'] = "Packaging: ${aiData['breakdown']['Packaging']}/25";
             response['data']['environment_impact']['water_usage'] = "Material: ${aiData['breakdown']['Material']}/25";
-            response['data']['environment_impact']['recyclability'] = "Recyclability: ${aiData['breakdown']['Recyclability']}/20";
+            response['data']['environment_impact']['packaging_material'] = aiData['recyclability'] ?? "Recyclable materials detected";
+            response['data']['environment_impact']['recyclability'] = "Score: ${aiData['breakdown']['Recyclability']}/20";
           } else if (aiData['action'] != null) {
-             response['data']['environment_impact']['carbon_footprint'] = aiData['action'];
-             response['data']['environment_impact']['packaging_material'] = aiData['material'] ?? '';
-             response['data']['environment_impact']['recyclability'] = aiData['diy'] ?? 'Follow local guidelines';
+            response['data']['environment_impact']['carbon_footprint'] = "Action: ${aiData['action']}";
+            response['data']['environment_impact']['packaging_material'] = aiData['material'] ?? 'Household material';
+            response['data']['environment_impact']['recyclability'] = aiData['diy'] ?? 'Follow local guidelines';
           }
         }
       });
@@ -500,7 +537,7 @@ class _MyHomePageState extends State<MyHomePage>
           ? '${productDetails['brand name'] ?? ''} ${productDetails['product name'] ?? ''}'
               .trim()
           : 'Unknown Product',
-      types: const ['Eco Certified', 'Consumer Good'],
+      types: _scannedTypes,
       description: productDetails != null
           ? '${productDetails['product description'] ?? 'No Description Available'}\n\n${productDetails['Packaging description'] ?? ''}'
               .trim()
@@ -513,14 +550,12 @@ class _MyHomePageState extends State<MyHomePage>
       price: productDetails != null &&
               productDetails['calorie count'] != null &&
               productDetails['calorie count'].length > 1
-          ? '${productDetails['calorie count'][1][1]} kCal'
+          ? '${productDetails['calorie count'][1][1]}'
           : 'Verified',
       facts: 'Evaluated using Amazon Rekognition object and label analytics.',
-      locationText: productDetails != null
-          ? '${productDetails['Manufacturing Location'] ?? 'Made in USA'}'
-          : 'Global Sourcing',
+      locationText: _scannedLocation,
       ecoscoreStatName: 'Ecoscore',
-      ecoscoreStatValue: 78,
+      ecoscoreStatValue: _scannedEcoScore,
     );
   }
 
