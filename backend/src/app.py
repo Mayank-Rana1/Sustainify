@@ -235,63 +235,75 @@ def handler(event, context):
 
     # ---- 3. Direct analyze (base64 image in body — no S3 CORS needed) ----
     if method == 'POST' and path == '/analyze-direct':
-        body = json.loads(event.get('body') or '{}')
-        mode = body.get('mode', 'shop')
-        image_b64 = body.get('image')
-        name = body.get('name', '')
-        details = body.get('details', '')
-        condition = body.get('condition', '')
-
-        if not image_b64:
-            return resp(400, {'error': 'image (base64) is required'})
-
         try:
-            image_bytes = base64.b64decode(image_b64)
-        except Exception:
-            return resp(400, {'error': 'Invalid base64 image data'})
+            body = json.loads(event.get('body') or '{}')
+            mode = body.get('mode', 'shop')
+            image_b64 = body.get('image')
+            name = body.get('name', '')
+            details = body.get('details', '')
+            condition = body.get('condition', '')
 
-        # Upload to S3 server-side (no CORS issues)
-        ext = 'jpg'
-        image_key = f"uploads/{user}/{uuid.uuid4()}.{ext}"
-        try:
-            s3.put_object(Bucket=BUCKET, Key=image_key, Body=image_bytes, ContentType=f'image/{ext}')
-        except ClientError as e:
-            return resp(500, {'error': f'S3 upload failed: {str(e)}'})
+            if not image_b64:
+                return resp(400, {'error': 'image (base64) is required'})
 
-        # Call Amazon Rekognition
-        try:
-            rek_response = rekognition.detect_labels(
-                Image={'Bytes': image_bytes},
-                MaxLabels=20,
-                MinConfidence=60
-            )
-            labels = rek_response.get('Labels', [])
-        except ClientError as e:
-            return resp(500, {'error': f'Amazon Rekognition failed: {str(e)}'})
+            try:
+                image_bytes = base64.b64decode(image_b64)
+            except Exception as b64_err:
+                return resp(400, {'error': f'Invalid base64 image data: {str(b64_err)}'})
 
-        # Build sustainability analysis
-        if mode == 'shop':
-            ai_result = _analyze_shop(labels, name, details)
-        else:
-            ai_result = _analyze_dispose(labels, name, condition, details)
+            # Upload to S3 server-side (no CORS issues)
+            ext = 'jpg'
+            image_key = f"uploads/{user}/{uuid.uuid4()}.{ext}"
+            try:
+                s3.put_object(Bucket=BUCKET, Key=image_key, Body=image_bytes, ContentType=f'image/{ext}')
+            except Exception as e:
+                print(f"S3 upload error: {e}")
+                # Don't fail if S3 put fails, still run Rekognition
 
-        # Save to DynamoDB
-        aid = str(uuid.uuid4())
-        now = int(time.time())
-        item = {
-            'PK': f'USER#{user}',
-            'SK': f'ANALYSIS#{now}#{aid}',
-            'analysisId': aid,
-            'createdAt': now,
-            'mode': mode,
-            'name': name,
-            'details': details,
-            'condition': condition,
-            'imageKey': image_key,
-            'result': ai_result
-        }
-        ddb.put_item(Item=item)
-        return resp(201, item)
+            # Call Amazon Rekognition
+            try:
+                rek_response = rekognition.detect_labels(
+                    Image={'Bytes': image_bytes},
+                    MaxLabels=20,
+                    MinConfidence=60
+                )
+                labels = rek_response.get('Labels', [])
+            except Exception as e:
+                print(f"Rekognition error: {e}")
+                labels = []
+
+            # Build sustainability analysis
+            if mode == 'shop':
+                ai_result = _analyze_shop(labels, name, details)
+            else:
+                ai_result = _analyze_dispose(labels, name, condition, details)
+
+            # Save to DynamoDB
+            aid = str(uuid.uuid4())
+            now = int(time.time())
+            item = {
+                'PK': f'USER#{user}',
+                'SK': f'ANALYSIS#{now}#{aid}',
+                'analysisId': aid,
+                'createdAt': now,
+                'mode': mode,
+                'name': name,
+                'details': details,
+                'condition': condition,
+                'imageKey': image_key,
+                'result': ai_result
+            }
+            try:
+                ddb.put_item(Item=item)
+            except Exception as e:
+                print(f"DynamoDB error: {e}")
+
+            return resp(200, item)
+        except Exception as general_err:
+            import traceback
+            trace = traceback.format_exc()
+            print(f"General error in analyze-direct: {trace}")
+            return resp(500, {'error': str(general_err), 'trace': trace})
 
     # ---- 4. Analyze image using Amazon Rekognition (S3 presigned flow) ----
     if method == 'POST' and path.startswith('/analyses'):

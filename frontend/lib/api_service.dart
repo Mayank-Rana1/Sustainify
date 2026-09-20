@@ -1,7 +1,9 @@
 import 'dart:io';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:mime/mime.dart';
+import 'package:image/image.dart' as img;
 
 /// AWS Configuration — Fill these after running `sam deploy`
 class AwsConfig {
@@ -120,6 +122,21 @@ class AuthService {
 
 /// ---------- API Service (S3 + Lambda + Rekognition + DynamoDB) ----------
 class ApiService {
+  /// Compress image to keep payload under Lambda's 6MB limit
+  static List<int> _compressImage(List<int> rawBytes) {
+    final decoded = img.decodeImage(Uint8List.fromList(rawBytes));
+    if (decoded == null) return rawBytes;
+
+    // Resize to max 800px wide (keeps aspect ratio)
+    img.Image resized = decoded;
+    if (decoded.width > 800) {
+      resized = img.copyResize(decoded, width: 800);
+    }
+
+    // Encode as JPEG at 70% quality (~100-300KB output)
+    return img.encodeJpg(resized, quality: 70);
+  }
+
   static Future<Map<String, dynamic>> uploadFile(
       String endpoint, File file, String userDetails) async {
 
@@ -134,9 +151,11 @@ class ApiService {
     }
 
     try {
-      // Read image and convert to base64
-      final bytes = file.readAsBytesSync();
-      final base64Image = base64Encode(bytes);
+      // Read image, compress, and convert to base64
+      final rawBytes = file.readAsBytesSync();
+      final compressed = _compressImage(rawBytes);
+      final base64Image = base64Encode(compressed);
+      print('Image compressed: ${rawBytes.length} -> ${compressed.length} bytes');
 
       // Single call: send base64 image directly to Lambda
       // Lambda handles S3 upload + Rekognition + DynamoDB all server-side
@@ -156,7 +175,7 @@ class ApiService {
         Map<String, dynamic> responseData = jsonDecode(response.body);
         return responseData['result'] ?? responseData;
       } else {
-        throw Exception('Analysis failed: ${response.body}');
+        throw Exception('Analysis failed (${response.statusCode}): ${response.body}');
       }
     } catch (e) {
       print('Error: $e');
