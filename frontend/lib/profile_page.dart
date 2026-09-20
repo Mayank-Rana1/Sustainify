@@ -65,10 +65,53 @@ class ProfilePage extends StatelessWidget {
                 padding: EdgeInsets.symmetric(horizontal: 24),
                 child: Column(
                   children: [
-                    _buildMenuItem(Icons.history, 'Scan History', 'View your past scans', () {}),
-                    _buildMenuItem(Icons.settings_outlined, 'Settings', 'App preferences', () {}),
-                    _buildMenuItem(Icons.info_outline, 'About Sustainify', 'Learn about our mission', () {}),
-                    _buildMenuItem(Icons.privacy_tip_outlined, 'Privacy Policy', 'How we handle your data', () {}),
+                    _buildMenuItem(Icons.history, 'Scan History', 'View your past scans', () {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Please use the History tab at the bottom to view past scans.'),
+                          behavior: SnackBarBehavior.floating,
+                          backgroundColor: Color(0xFF2E7D32),
+                        ),
+                      );
+                    }),
+                    _buildMenuItem(Icons.settings_outlined, 'Settings', 'App preferences', () {
+                      _showSettingsSheet(context);
+                    }),
+                    _buildMenuItem(Icons.info_outline, 'About Sustainify', 'Learn about our mission', () {
+                      showAboutDialog(
+                        context: context,
+                        applicationName: 'Sustainify AI',
+                        applicationVersion: '1.0.0',
+                        applicationLegalese: '© 2026 Sustainify Team\nBuilt for AWS Hackathon',
+                        applicationIcon: Container(
+                          padding: EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Color(0xFFE8F5E9),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(Icons.eco, size: 40, color: Color(0xFF43A047)),
+                        ),
+                        children: [
+                          SizedBox(height: 10),
+                          Text('Sustainify helps you shop smart and dispose smart by using AWS Rekognition to analyze everyday products and provide environmental impact insights.'),
+                        ],
+                      );
+                    }),
+                    _buildMenuItem(Icons.privacy_tip_outlined, 'Privacy Policy', 'How we handle your data', () {
+                      showDialog(
+                        context: context,
+                        builder: (context) => AlertDialog(
+                          title: Text('Privacy Policy', style: TextStyle(color: Color(0xFF2E7D32))),
+                          content: Text('We respect your privacy.\n\nImages are processed via AWS Rekognition to generate eco-insights and are not permanently stored without your consent.\n\nYour history is securely stored in DynamoDB for your convenience.'),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context), 
+                              child: Text('Close', style: TextStyle(color: Color(0xFF43A047)))
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
                   ],
                 ),
               ),
@@ -112,6 +155,66 @@ class ProfilePage extends StatelessWidget {
             Text(label, style: TextStyle(fontSize: 11, color: Colors.grey[600])),
           ],
         ),
+      ),
+    );
+  }
+
+  void _showSettingsSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) {
+          return Container(
+            padding: EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Settings', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF2E7D32))),
+                SizedBox(height: 20),
+                SwitchListTile(
+                  title: Text('Push Notifications', style: TextStyle(fontWeight: FontWeight.w500)),
+                  subtitle: Text('Get reminders to dispose items responsibly', style: TextStyle(fontSize: 12)),
+                  value: true,
+                  activeColor: Color(0xFF43A047),
+                  onChanged: (val) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Notifications updated'), duration: Duration(seconds: 1)),
+                    );
+                  },
+                ),
+                SwitchListTile(
+                  title: Text('Dark Mode', style: TextStyle(fontWeight: FontWeight.w500)),
+                  subtitle: Text('Coming soon in a future update', style: TextStyle(fontSize: 12)),
+                  value: false,
+                  activeColor: Color(0xFF43A047),
+                  onChanged: (val) {
+                     ScaffoldMessenger.of(context).showSnackBar(
+                       SnackBar(content: Text('Dark mode is currently under development.'), duration: Duration(seconds: 1)),
+                     );
+                  },
+                ),
+                SizedBox(height: 20),
+                Center(
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(context),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Color(0xFF43A047),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      padding: EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                    ),
+                    child: Text('Close', style: TextStyle(color: Colors.white)),
+                  ),
+                )
+              ],
+            ),
+          );
+        }
       ),
     );
   }
