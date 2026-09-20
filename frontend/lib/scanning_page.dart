@@ -2,34 +2,56 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'api_service.dart';
 
 class ScanningPage extends StatefulWidget {
   final CameraDescription camera;
-  final String mode; // 'shop' or 'dispose'
+  final String mode; 
 
-  const ScanningPage({Key? key, required this.camera, required this.mode}) : super(key: key);
+  const ScanningPage({Key? key, required this.camera, this.mode = 'shop'})
+      : super(key: key);
 
   @override
   _ScanningPageState createState() => _ScanningPageState();
 }
 
-class _ScanningPageState extends State<ScanningPage> {
+class _ScanningPageState extends State<ScanningPage>
+    with SingleTickerProviderStateMixin {
   late CameraController _controller;
   late Future<void> _initializeControllerFuture;
   bool _isFlashOn = false;
+  bool _isRecording = false;
+  File? _videoFile; // Now used for image
+  late AnimationController _animationController;
+  late Animation<double> _animation;
   bool _isProcessing = false;
 
   @override
   void initState() {
     super.initState();
-    _controller = CameraController(widget.camera, ResolutionPreset.high, enableAudio: false);
+    _controller = CameraController(
+      widget.camera,
+      ResolutionPreset.high,
+      enableAudio: false,
+    );
     _initializeControllerFuture = _controller.initialize();
+
+    _animationController = AnimationController(
+      vsync: this,
+      duration: Duration(seconds: 10),
+    );
+
+    _animation = Tween<double>(begin: 0, end: 1).animate(_animationController)
+      ..addListener(() {
+        setState(() {});
+      });
   }
 
   @override
   void dispose() {
     _controller.dispose();
+    _animationController.dispose();
     super.dispose();
   }
 
@@ -45,6 +67,42 @@ class _ScanningPageState extends State<ScanningPage> {
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Analysis failed: $e')));
       setState(() => _isProcessing = false);
+    }
+  }
+
+  Future<void> _startVideoRecording() async {
+    if (!_controller.value.isInitialized) return;
+    _animationController.forward();
+    setState(() {
+      _isRecording = true;
+    });
+  }
+
+  Future<void> _stopVideoRecording() async {
+    _animationController.reset();
+    setState(() {
+      _isRecording = false;
+    });
+    
+    // Instead of stopping video, take a picture for AWS
+    try {
+      final image = await _controller.takePicture();
+      await _processImage(File(image.path));
+    } catch (e) {
+      print('Error taking picture: $e');
+    }
+  }
+
+  // Function to pick a video from the gallery
+  Future<void> _pickVideoFromGallery() async {
+    FilePickerResult? result = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+    );
+
+    if (result != null) {
+      await _processImage(File(result.files.single.path!));
+    } else {
+      print('Image picking canceled.');
     }
   }
 
@@ -155,22 +213,32 @@ class _ScanningPageState extends State<ScanningPage> {
                         onPressed: _pickGallery,
                       ),
                       GestureDetector(
-                        onTap: _takePicture,
-                        child: Container(
-                          width: 80,
-                          height: 80,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 4),
-                            color: Colors.white38,
-                          ),
-                          child: Center(
-                            child: Container(
-                              width: 65,
-                              height: 65,
-                              decoration: BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                        onLongPressStart: (details) => _startVideoRecording(),
+                        onLongPressEnd: (details) => _stopVideoRecording(),
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            AnimatedBuilder(
+                              animation: _animation,
+                              builder: (context, child) {
+                                return CircularProgressIndicator(
+                                  value: _animation.value,
+                                  strokeWidth: 8.0,
+                                  color: Colors.greenAccent[700],
+                                  backgroundColor: Colors.grey,
+                                );
+                              },
                             ),
-                          ),
+                            CircleAvatar(
+                              radius: 35.0,
+                              backgroundColor: Colors.greenAccent[700],
+                              child: Icon(
+                                _isRecording ? Icons.stop : Icons.videocam,
+                                color: Colors.white,
+                                size: 35.0,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                       SizedBox(width: 48), // Balance the row
