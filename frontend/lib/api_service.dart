@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:mime/mime.dart';
+import 'package:image/image.dart' as img;
 
 /// AWS Configuration — Fill these after running `sam deploy`
 class AwsConfig {
@@ -120,15 +121,27 @@ class AuthService {
 
 /// ---------- API Service (S3 + Lambda + Rekognition + DynamoDB) ----------
 class ApiService {
+  /// Compress image to keep payload under Lambda's 6MB limit
+  static List<int> _compressImage(List<int> rawBytes) {
+    final decoded = img.decodeImage(rawBytes);
+    if (decoded == null) return rawBytes;
+
+    // Resize to max 800px wide (keeps aspect ratio)
+    img.Image resized = decoded;
+    if (decoded.width > 800) {
+      resized = img.copyResize(decoded, width: 800);
+    }
+
+    // Encode as JPEG at 70% quality (~100-300KB output)
+    return img.encodeJpg(resized, quality: 70);
+  }
+
   static Future<Map<String, dynamic>> uploadFile(
       String endpoint, File file, String userDetails) async {
 
     if (AwsConfig.apiUrl == 'YOUR_API_URL_HERE') {
       throw Exception('Please set your AWS API URL in api_service.dart');
     }
-
-    String? mimeType = lookupMimeType(file.path) ?? 'image/jpeg';
-    String ext = mimeType.split('/').last;
 
     // Build auth headers if logged in
     Map<String, String> authHeaders = {'Content-Type': 'application/json'};
@@ -137,47 +150,31 @@ class ApiService {
     }
 
     try {
-      // Step 1: Get Presigned URL from Lambda → S3
-      var urlResponse = await http.post(
-        Uri.parse('${AwsConfig.apiUrl}/upload-url'),
-        headers: authHeaders,
-        body: jsonEncode({'extension': ext}),
-      );
+      // Read image, compress, and convert to base64
+      final rawBytes = file.readAsBytesSync();
+      final compressed = _compressImage(rawBytes);
+      final base64Image = base64Encode(compressed);
+      print('Image compressed: ${rawBytes.length} -> ${compressed.length} bytes');
 
-      if (urlResponse.statusCode != 200) throw Exception('Failed to get upload URL');
-      var urlData = jsonDecode(urlResponse.body);
-      String uploadUrl = urlData['uploadUrl'];
-      String imageKey = urlData['imageKey'];
-
-      // Step 2: Upload image directly to S3
-      var s3Response = await http.put(
-        Uri.parse(uploadUrl),
-        headers: {'Content-Type': mimeType},
-        body: file.readAsBytesSync(),
-      );
-
-      if (s3Response.statusCode != 200 && s3Response.statusCode != 201) {
-        throw Exception('Failed to upload image to S3');
-      }
-
-      // Step 3: Trigger Lambda → Rekognition analysis → DynamoDB save
-      var analyzeResponse = await http.post(
-        Uri.parse('${AwsConfig.apiUrl}/analyses'),
+      // Single call: send base64 image directly to Lambda
+      // Lambda handles S3 upload + Rekognition + DynamoDB all server-side
+      var response = await http.post(
+        Uri.parse('${AwsConfig.apiUrl}/analyze-direct'),
         headers: authHeaders,
         body: jsonEncode({
           'mode': endpoint.contains('eco') ? 'shop' : 'dispose',
-          'imageKey': imageKey,
+          'image': base64Image,
           'name': '',
           'details': userDetails,
           'condition': '',
         }),
       );
 
-      if (analyzeResponse.statusCode == 200 || analyzeResponse.statusCode == 201) {
-        Map<String, dynamic> responseData = jsonDecode(analyzeResponse.body);
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        Map<String, dynamic> responseData = jsonDecode(response.body);
         return responseData['result'] ?? responseData;
       } else {
-        throw Exception('Analysis failed: ${analyzeResponse.body}');
+        throw Exception('Analysis failed (${response.statusCode}): ${response.body}');
       }
     } catch (e) {
       print('Error: $e');

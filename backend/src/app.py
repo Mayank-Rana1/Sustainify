@@ -233,7 +233,67 @@ def handler(event, context):
         )
         return resp(200, {'uploadUrl': url, 'imageKey': key})
 
-    # ---- 3. Analyze image using Amazon Rekognition ----
+    # ---- 3. Direct analyze (base64 image in body — no S3 CORS needed) ----
+    if method == 'POST' and path == '/analyze-direct':
+        body = json.loads(event.get('body') or '{}')
+        mode = body.get('mode', 'shop')
+        image_b64 = body.get('image')
+        name = body.get('name', '')
+        details = body.get('details', '')
+        condition = body.get('condition', '')
+
+        if not image_b64:
+            return resp(400, {'error': 'image (base64) is required'})
+
+        try:
+            image_bytes = base64.b64decode(image_b64)
+        except Exception:
+            return resp(400, {'error': 'Invalid base64 image data'})
+
+        # Upload to S3 server-side (no CORS issues)
+        ext = 'jpg'
+        image_key = f"uploads/{user}/{uuid.uuid4()}.{ext}"
+        try:
+            s3.put_object(Bucket=BUCKET, Key=image_key, Body=image_bytes, ContentType=f'image/{ext}')
+        except ClientError as e:
+            return resp(500, {'error': f'S3 upload failed: {str(e)}'})
+
+        # Call Amazon Rekognition
+        try:
+            rek_response = rekognition.detect_labels(
+                Image={'Bytes': image_bytes},
+                MaxLabels=20,
+                MinConfidence=60
+            )
+            labels = rek_response.get('Labels', [])
+        except ClientError as e:
+            return resp(500, {'error': f'Amazon Rekognition failed: {str(e)}'})
+
+        # Build sustainability analysis
+        if mode == 'shop':
+            ai_result = _analyze_shop(labels, name, details)
+        else:
+            ai_result = _analyze_dispose(labels, name, condition, details)
+
+        # Save to DynamoDB
+        aid = str(uuid.uuid4())
+        now = int(time.time())
+        item = {
+            'PK': f'USER#{user}',
+            'SK': f'ANALYSIS#{now}#{aid}',
+            'analysisId': aid,
+            'createdAt': now,
+            'mode': mode,
+            'name': name,
+            'details': details,
+            'condition': condition,
+            'imageKey': image_key,
+            'result': ai_result
+        }
+        ddb.put_item(Item=item)
+        return resp(201, item)
+
+    # ---- 4. Analyze image using Amazon Rekognition (S3 presigned flow) ----
     if method == 'POST' and path.startswith('/analyses'):
         body = json.loads(event.get('body') or '{}')
         mode = body.get('mode', 'shop')
@@ -280,7 +340,7 @@ def handler(event, context):
         ddb.put_item(Item=item)
         return resp(201, item)
 
-    # ---- 4. Retrieve Analysis History from DynamoDB ----
+    # ---- 5. Retrieve Analysis History from DynamoDB ----
     if method == 'GET' and path == '/analyses':
         from boto3.dynamodb.conditions import Key
         data = ddb.query(
@@ -290,3 +350,4 @@ def handler(event, context):
         return resp(200, {'items': data.get('Items', [])})
 
     return resp(404, {'error': 'Not found'})
+

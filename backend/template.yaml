@@ -6,8 +6,8 @@ Description: >
 
 Globals:
   Function:
-    Timeout: 30
-    MemorySize: 512
+    Timeout: 60
+    MemorySize: 1024
 
 Resources:
   # ---- Amazon Cognito (Authentication) ----
